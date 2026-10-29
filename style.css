@@ -1,0 +1,134 @@
+* { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+
+/* Variables Temáticas por Defecto */
+:root {
+  --bg-color: #f4f7f6;
+  --panel-bg: #ffffff;
+  --text-main: #333333;
+  --btn-primary: #3498db;
+  --btn-secondary: #ecf0f1;
+  --accent: #2c3e50;
+}
+
+/* TEMÁTICA HALLOWEEN (Octubre) */
+body.theme-halloween {
+  --bg-color: #1a1a2e;
+  --panel-bg: #16213e;
+  --text-main: #e9e9e9;
+  --btn-primary: #e67e22; /* Naranja Calabaza */
+  --btn-secondary: #4a4e69;
+  --accent: #e67e22;
+}
+
+/* TEMÁTICA NAVIDAD (Diciembre) */
+body.theme-christmas {
+  --bg-color: #c0392b; /* Rojo festivo */
+  --panel-bg: #ffffff;
+  --text-main: #2c3e50;
+  --btn-primary: #27ae60; /* Verde pino */
+  --btn-secondary: #ecf0f1;
+  --accent: #c0392b;
+}
+
+/* TEMÁTICA PRIMAVERA (Septiembre) */
+body.theme-spring {
+  --bg-color: #f1f8e9; /* Verde claro */
+  --panel-bg: #ffffff;
+  --text-main: #33691e;
+  --btn-primary: #fbc02d; /* Amarillo floral */
+  --btn-secondary: #c8e6c9;
+  --accent: #fbc02d;
+}
+
+body { background-color: var(--bg-color); color: var(--text-main); padding: 20px; text-align: center; transition: background 0.5s; }
+
+.view { 
+  max-width: 500px; margin: 0 auto; 
+  background: var(--panel-bg); color: var(--text-main);
+  padding: 25px; border-radius: 12px; 
+  box-shadow: 0 8px 16px rgba(0,0,0,0.2); 
+}
+.hidden { display: none !important; }
+
+h1, h2, h3, h4 { margin-bottom: 20px; color: var(--accent); }
+
+input, select { 
+  width: 100%; padding: 14px; margin-bottom: 15px; 
+  border: 1px solid #ccc; border-radius: 8px; font-size: 16px; outline: none; 
+}
+
+.btn { 
+  width: 100%; padding: 15px; margin-bottom: 15px; border: none; 
+  border-radius: 8px; font-size: 18px; font-weight: bold; cursor: pointer; 
+}
+.primary { background-color: var(--btn-primary); color: white; }
+.secondary { background-color: var(--btn-secondary); color: #333; }
+.report-btn { background-color: #8e44ad; color: white; }
+.finish-btn { background-color: #e74c3c; color: white; }
+
+/* Docente */
+.q-block { border: 1px solid #ddd; padding: 15px; margin-bottom: 20px; border-radius: 8px; text-align: left; }
+
+/* Examen Alumno */
+.header-exam { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 2px solid #eee; padding-bottom: 10px;}
+.timer { font-size: 24px; font-weight: bold; color: var(--btn-primary); }
+.question-item { text-align: left; margin-bottom: 25px; border: 1px solid #eee; padding: 15px; border-radius: 8px;}
+.option-label { display: block; padding: 12px; border: 1px solid #ccc; margin-bottom: 8px; border-radius: 6px; cursor: pointer; }
+
+/* ===== NOTA GIGANTE ===== */
+.massive-score {
+  font-size: 70px;
+  font-weight: 900;
+  color: var(--btn-primary);
+  margin: 30px 0;
+  text-shadow: 2px 2px 5px rgba(0,0,0,0.1);
+}
+
+/* Loader */
+#loader { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); color: white; z-index: 1000; display: flex; flex-direction: column; justify-content: center; align-items: center; }
+.spinner { width: 50px; height: 50px; border: 5px solid #ccc; border-top-color: var(--btn-primary); border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 10px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ===== Paginación de Preguntas y Barra de Progreso ===== */
+.question-container {
+  display: none;
+  animation: fadeInRight 0.5s ease forwards;
+}
+.question-container.active {
+  display: block;
+}
+@keyframes fadeInRight {
+  from { opacity: 0; transform: translateX(20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.progress-bar-container {
+  width: 100%;
+  background-color: #eee;
+  border-radius: 8px;
+  height: 10px;
+  margin-bottom: 20px;
+  overflow: hidden;
+}
+.progress-bar {
+  height: 100%;
+  background-color: var(--btn-primary);
+  width: 0%;
+  transition: width 0.3s ease;
+}
+
+/* Efecto al seleccionar una alternativa */
+.option-label.selected {
+  background-color: #e8f4fd !important;
+  border-color: var(--btn-primary) !important;
+  font-weight: bold;
+}
+
+/* ===== Efecto visual estricto para botones deshabilitados ===== */
+button:disabled {
+  background-color: #9ca3af !important;
+  color: #f3f4f6 !important;
+  cursor: not-allowed !important;
+  opacity: 0.7 !important;
+  pointer-events: none;
+}
