@@ -6,6 +6,8 @@
   <title>EvaluaPro - Plataforma Interactiva</title>
   <link rel="stylesheet" href="style.css">
   <link rel="manifest" href="manifest.json">
+  <!-- TailwindCSS para utilidades de grid y flex -->
+  <script src="https://cdn.tailwindcss.com"></script>
   <!-- jsPDF y AutoTable para reportes ordenados -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
@@ -37,7 +39,6 @@
   <div id="view-teacher-dashboard" class="view hidden">
     <h2>Crear Nuevo Examen</h2>
     <input type="text" id="exam-code" placeholder="Código de Sala (Ej. SALA01)" required>
-    <input type="number" id="exam-time" placeholder="Tiempo en minutos" required>
     
     <div id="questions-container"></div>
     <button onclick="submitExamCreation()" class="btn primary">Crear Sala</button>
