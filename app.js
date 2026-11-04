@@ -1,5 +1,5 @@
 // NUEVO LINK ASIGNADO
-const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwZc3mIbD6Q83gohbWp-uTE3jjZVGLSAPqBErfFNn-sMWLi4EwsFg43Kki5WfXfJpFuEw/exec';
+const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbw_Fz4TqZZmJtbBucb0YKaERrbWL5wWCPIkDsk48ZAcVq1YhidAJyJJ3GlGHb_Q3zd8RQ/exec';
 
 let currentStudentName = '', currentRoomCode = '', currentExamData = [];
 let timeRemaining = 0, timerInterval;
@@ -51,6 +51,22 @@ async function postData(payload) {
     alert("Error de conexión con el servidor.");
     showLoader(false);
   }
+}
+
+// Mezcla un array y devuelve el array mezclado junto con el mapeo de sus índices originales
+function shuffleArrayWithMapping(array) {
+  let mappedArray = array.map((val, index) => ({ originalIndex: index, value: val }));
+  
+  // Fisher-Yates Shuffle
+  for (let i = mappedArray.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [mappedArray[i], mappedArray[j]] = [mappedArray[j], mappedArray[i]];
+  }
+  
+  return {
+    shuffledValues: mappedArray.map(item => item.value),
+    originalIndices: mappedArray.map(item => item.originalIndex)
+  };
 }
 
 // ===== MÓDULO DE RESILIENCIA (AUTOGUARDADO Y RECUPERACIÓN) =====
@@ -129,11 +145,16 @@ function addQuestionBlock() {
     <!-- Opciones para Opción Múltiple -->
     <div id="q${i}-multiple-options">
        <div id="q${i}-opt-list">
-          <input type="text" class="q${i}-opt-input w-full p-2 border rounded mb-1" placeholder="Opción 1" required>
-          <input type="text" class="q${i}-opt-input w-full p-2 border rounded mb-1" placeholder="Opción 2" required>
+          <input type="text" class="q${i}-opt-input w-full p-2 border rounded mb-1" placeholder="Opción 1" oninput="updateCorrectClaveDropdown(${i})" required>
+          <input type="text" class="q${i}-opt-input w-full p-2 border rounded mb-1" placeholder="Opción 2" oninput="updateCorrectClaveDropdown(${i})" required>
        </div>
        <button onclick="addOptionToQ(${i})" class="btn secondary mb-2 text-sm" style="background:#3498db; color:white; padding: 5px 10px;">+ Añadir Opción</button>
-       <input type="text" id="q${i}-correct" class="w-full p-2 border rounded" placeholder="Texto exacto de la opción correcta" required>
+       
+       <p class="text-sm font-bold text-indigo-800 mt-2 mb-1">Selecciona la clave correcta:</p>
+       <select id="q${i}-correct" class="w-full p-2 border rounded font-bold" required>
+          <option value="Opcion_1">Opción A</option>
+          <option value="Opcion_2">Opción B</option>
+       </select>
     </div>
     
     <!-- Contenedor dinámico Match -->
@@ -177,7 +198,34 @@ function addOptionToQ(index) {
   newInput.className = `q${index}-opt-input w-full p-2 border rounded mb-1`;
   newInput.placeholder = `Opción ${count}`;
   newInput.required = true;
+  newInput.oninput = () => updateCorrectClaveDropdown(index);
   optList.appendChild(newInput);
+  
+  updateCorrectClaveDropdown(index); // Actualiza el dropdown al instante
+}
+
+function updateCorrectClaveDropdown(index) {
+  const select = document.getElementById(`q${index}-correct`);
+  const optList = document.getElementById(`q${index}-opt-list`);
+  const inputs = optList.querySelectorAll('input');
+  
+  // Guardamos el valor actual seleccionado para intentar mantenerlo
+  const currentValue = select.value;
+  
+  select.innerHTML = ''; // Limpiamos las opciones actuales
+  
+  inputs.forEach((inp, idx) => {
+    const letra = String.fromCharCode(65 + idx); // A, B, C, D...
+    const option = document.createElement('option');
+    option.value = `Opcion_${idx + 1}`; // Esto es clave, así lo mapea tu lógica
+    option.text = `Opción ${letra}`;
+    select.appendChild(option);
+  });
+  
+  // Intentar restaurar el valor previo si aún existe
+  if (currentValue && select.querySelector(`option[value="${currentValue}"]`)) {
+      select.value = currentValue;
+  }
 }
 
 function addMatchToQ(index) {
@@ -244,14 +292,18 @@ async function submitExamCreation() {
         if (inp.value.trim()) optDict[`Opcion_${idx+1}`] = inp.value.trim(); 
       });
       obj.opciones = optDict;
-      obj.correcta = document.getElementById(`q${i}-correct`).value.trim();
+      
+      // Capturamos la clave (ej: "Opcion_2") y guardamos su texto correspondiente en el diccionario
+      const claveSeleccionada = document.getElementById(`q${i}-correct`).value;
+      obj.correcta = optDict[claveSeleccionada] || ""; 
     } else if (tipo === 'match') {
       const conceptos = Array.from(document.querySelectorAll(`.q${i}-m-c`)).map(e => e.value.trim()).filter(Boolean);
       const definiciones = Array.from(document.querySelectorAll(`.q${i}-m-d`)).map(e => e.value.trim()).filter(Boolean);
       obj.opciones = { conceptos, definiciones };
-      // La clave correcta es la correspondencia: concepto 1 -> definición a, etc.
-      // Guardamos los índices para evaluar proporcionalmente
-      obj.correcta = "MATCH_PROPORCIONAL";
+      
+      // La clave ahora es un mapa directo indexado: [0] -> [0], [1] -> [1]
+      // Esto significa que el Concepto en la posición 0 hace match con la Definición original en la posición 0.
+      obj.correcta = "MATCH_DINAMICO"; 
     } else {
       obj.opciones = null;
       obj.correcta = "MANUAL";
@@ -450,13 +502,20 @@ function renderCurrentQuestion(isRecovery = false) {
     interactableHTML = opcionesHTML;
   } else if (q.tipo === 'match') {
     const conceptos = q.opciones?.conceptos || [];
-    const definiciones = q.opciones?.definiciones || [];
+    const definicionesOriginales = q.opciones?.definiciones || [];
     const letrasDef = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
     
-    const conceptosHTML = conceptos.map((c, idx) => `<p class="text-sm mb-1"><strong>${idx + 1}.</strong> ${c}</p>`).join('');
-    const definicionesHTML = definiciones.map((d, idx) => `<p class="text-sm mb-1"><strong>${letrasDef[idx]})</strong> ${d}</p>`).join('');
+    // Si la pregunta no ha sido mezclada en esta sesión, la mezclamos y guardamos el mapeo
+    if (!q.shuffledMapping) {
+       const shuffledData = shuffleArrayWithMapping(definicionesOriginales);
+       q.shuffledDefiniciones = shuffledData.shuffledValues;
+       q.shuffledMapping = shuffledData.originalIndices; // Ej: [2, 0, 1] significa que la "a" actual era la original "c"
+    }
 
-    // Generar inputs dinámicos según cantidad de conceptos
+    const conceptosHTML = conceptos.map((c, idx) => `<p class="text-sm mb-1"><strong>${idx + 1}.</strong> ${c}</p>`).join('');
+    // Renderizamos las definiciones mezcladas, pero manteniendo las letras ordenadas (a, b, c...)
+    const definicionesHTML = q.shuffledDefiniciones.map((d, idx) => `<p class="text-sm mb-1"><strong>${letrasDef[idx]})</strong> ${d}</p>`).join('');
+
     let inputsHTML = '';
     for (let i = 1; i <= conceptos.length; i++) {
       inputsHTML += `<div class="text-center"><span class="font-bold text-lg block mb-1">${i}</span><input type="text" id="resp_m${i}_${q.id}" class="w-12 h-10 border-2 border-indigo-300 rounded text-center font-bold uppercase text-lg" maxlength="1"></div>`;
@@ -469,7 +528,7 @@ function renderCurrentQuestion(isRecovery = false) {
               ${conceptosHTML}
           </div>
           <div class="flex-1">
-              <h5 class="font-bold text-indigo-700 mb-2 border-b">Definiciones</h5>
+              <h5 class="font-bold text-indigo-700 mb-2 border-b">Definiciones (Aleatorias)</h5>
               ${definicionesHTML}
           </div>
       </div>
@@ -631,24 +690,30 @@ async function finishExam() {
         puntaje += ptsPregunta; 
       }
     } else if (pregunta.tipo === 'match') {
-      // Evaluación proporcional para match
       if (valorAlumno && valorAlumno !== "Sin responder" && !valorAlumno.startsWith("ANULADA")) {
         const conceptos = pregunta.opciones?.conceptos || [];
-        const definiciones = pregunta.opciones?.definiciones || [];
-        const totalPares = Math.min(conceptos.length, definiciones.length);
+        const definicionesOriginales = pregunta.opciones?.definiciones || [];
+        const totalPares = Math.min(conceptos.length, definicionesOriginales.length);
         
         if (totalPares > 0) {
           const letrasDef = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
           const valorPorAcierto = ptsPregunta / totalPares;
           let aciertos = 0;
 
-          // La clave correcta implícita: concepto i -> letra i (A, B, C...)
           const paresAlumno = valorAlumno.split(', ');
+          
           paresAlumno.forEach(par => {
-            const [num, letra] = par.split('-');
-            const idxConcepto = parseInt(num) - 1;
-            if (idxConcepto >= 0 && idxConcepto < totalPares) {
-              if (letra === letrasDef[idxConcepto]) {
+            const [num, letra] = par.split('-'); // Ej: "1-B"
+            const idxConcepto = parseInt(num) - 1; // Índice 0
+            const idxLetraAlumno = letrasDef.indexOf(letra.toUpperCase()); // Índice de "B" es 1
+            
+            if (idxConcepto >= 0 && idxConcepto < totalPares && idxLetraAlumno !== -1) {
+              // El Concepto en idxConcepto originalmente hacía match con la Definición en idxConcepto
+              // Debemos verificar si la letra que escogió el alumno (idxLetraAlumno) contiene la definición original correcta.
+              // Para eso, consultamos el mapeo de aleatorización que creamos al renderizar:
+              const indiceOriginalDeLaDefinicionSeleccionada = pregunta.shuffledMapping[idxLetraAlumno];
+              
+              if (indiceOriginalDeLaDefinicionSeleccionada === idxConcepto) {
                 aciertos++;
               }
             }
