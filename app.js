@@ -1,7 +1,8 @@
 // NUEVO LINK ASIGNADO
-const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzW0uHIoQHxQsElKjocebgloxqtABrzrFQapvQqKQvVyPvRICIGVzW9MYo_iWRud8VI6g/exec';
+const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzTl3wfd8VVm4owU3C3uwvxpvvTJTEzJRFgE-gVvNxn1H18OeBygBsQnk8-fs2XIRVy5Q/exec';
 
 let currentStudentName = '', currentRoomCode = '', currentExamData = [];
+let currentAntiTrampaConfig = { limiteAdvertencias: 1, limiteExpulsion: 3, puntosPenalidad: 2 }; // Default
 let timeRemaining = 0, timerInterval;
 let myLastPuntaje = 0, myLastRespuestas = {};
 
@@ -78,7 +79,8 @@ function saveExamProgress() {
   const state = {
     room: currentRoomCode, name: currentStudentName, exam: currentExamData,
     index: currentQuestionIndex, resp: temporalRespuestas, time: timeRemaining,
-    cheatW: cheatWarnings, penality: gameState.penalidadTrampa
+    cheatW: cheatWarnings, penality: gameState.penalidadTrampa,
+    antiTrampa: currentAntiTrampaConfig
   };
   localStorage.setItem('evalua_progress', JSON.stringify(state));
 }
@@ -91,6 +93,7 @@ function checkSavedProgress() {
        currentRoomCode = s.room; currentStudentName = s.name; currentExamData = s.exam;
        currentQuestionIndex = s.index; temporalRespuestas = s.resp; timeRemaining = s.time;
        cheatWarnings = s.cheatW; gameState.penalidadTrampa = s.penality;
+       if (s.antiTrampa) currentAntiTrampaConfig = s.antiTrampa;
        isExamActive = true; totalQuestions = currentExamData.length;
        document.getElementById('display-student').innerText = currentStudentName;
        showView('view-exam');
@@ -318,8 +321,21 @@ async function submitExamCreation() {
     return alert("Debes crear al menos una pregunta válida.");
   }
 
+  // Recoger configuración Anti-Trampas
+  const antiTrampaConf = {
+    limiteAdvertencias: parseInt(document.getElementById('config-penalties-start').value) - 1, // Si elige a la 2da, el límite de solo advertencia es 1
+    limiteExpulsion: parseInt(document.getElementById('config-expulsion').value),
+    puntosPenalidad: parseFloat(document.getElementById('config-penalty-points').value)
+  };
+
   showLoader(true);
-  const res = await postData({ action: 'crear_examen', codigoSala: code, minutos: 0, preguntas });
+  const res = await postData({ 
+    action: 'crear_examen', 
+    codigoSala: code, 
+    minutos: 0, 
+    preguntas: preguntas,
+    antiTrampa: antiTrampaConf 
+  });
   showLoader(false);
   if (res && res.status === 'success') { 
     alert(`Sala ${code} lista con ${preguntas.length} preguntas.`); 
@@ -666,12 +682,30 @@ async function loginStudent() {
 
   if (res && res.status === 'success') {
     currentStudentName = name; currentRoomCode = code; currentExamData = res.examen;
-    showAgreementView(); // EN LUGAR DE startExam();
+    // Guardar config del profesor
+    if (res.antiTrampa) currentAntiTrampaConfig = res.antiTrampa; 
+    
+    showAgreementView();
   } else alert("Sala inactiva.");
 }
 
 // ===== FUNCIONES DEL ACUERDO Y VALIDACIÓN =====
 function showAgreementView() {
+  // Actualizar textos dinámicos según configuración del profesor
+  const warnLimit = currentAntiTrampaConfig.limiteAdvertencias;
+  const expLimit = currentAntiTrampaConfig.limiteExpulsion;
+  const pts = currentAntiTrampaConfig.puntosPenalidad;
+  
+  const rulesList = document.getElementById('dynamic-rules-list');
+  if (rulesList) {
+    let rulesHtml = '';
+    if (warnLimit > 0) rulesHtml += `<li><strong>Infracciones 1 a ${warnLimit}:</strong> Advertencia en pantalla.</li>`;
+    if (expLimit > warnLimit + 1) rulesHtml += `<li><strong>Infracciones ${warnLimit + 1} a ${expLimit - 1}:</strong> Anulación de la pregunta actual y descuento de -${pts} puntos por vez.</li>`;
+    if (expLimit < 999) rulesHtml += `<li><strong>Infracción ${expLimit}:</strong> Cierre automático del examen con la nota acumulada.</li>`;
+    else rulesHtml += `<li><strong>Sin expulsión automática:</strong> Solo se aplicarán penalizaciones de -${pts} puntos por cada infracción.</li>`;
+    rulesList.innerHTML = rulesHtml;
+  }
+  
   // Generar CAPTCHA Matemático simple (Sumas o restas básicas)
   const num1 = Math.floor(Math.random() * 10) + 1;
   const num2 = Math.floor(Math.random() * 10) + 1;
@@ -1151,33 +1185,48 @@ document.addEventListener('paste', event => { if(isExamActive) event.preventDefa
 function handleCheatWarning(motivo) {
   cheatWarnings++;
   
-  if (cheatWarnings === 1) {
-    alert(`¡ADVERTENCIA ANTI-TRAMPA (1/2)!\nDetalle: ${motivo}\n\nEstá prohibido salir de la ventana de la evaluación. A tu próxima infracción, la pregunta en la que estés será ANULADA y se restarán 2 puntos de tu calificación global.`);
+  const warnLimit = currentAntiTrampaConfig.limiteAdvertencias; // Infracciones que son "gratis" (solo aviso)
+  const expLimit = currentAntiTrampaConfig.limiteExpulsion; // Infracción final (expulsión)
+  const penalty = currentAntiTrampaConfig.puntosPenalidad; // Puntos a restar
+
+  // 1. Caso de Expulsión
+  if (cheatWarnings >= expLimit) {
+    alert(`¡INFRACCIÓN CRÍTICA!\nDetalle: ${motivo}\n\nHas superado el límite de infracciones permitidas por el docente (${expLimit}). Tu evaluación ha sido cancelada y se han descontado los puntos correspondientes.`);
+    
+    // Anular pregunta actual y penalizar por última vez
+    const qActual = currentExamData[currentQuestionIndex];
+    temporalRespuestas[qActual.id] = `ANULADA (${motivo})`;
+    if (!gameState.penalidadTrampa) gameState.penalidadTrampa = 0;
+    gameState.penalidadTrampa -= penalty;
+    
+    finishExam(); 
+    return;
+  }
+
+  // 2. Caso de Solo Advertencia
+  if (cheatWarnings <= warnLimit) {
+    const infraccionesRestantes = warnLimit - cheatWarnings + 1;
+    alert(`¡ADVERTENCIA ANTI-TRAMPA!\nDetalle: ${motivo}\n\nEstá prohibido salir de la ventana de la evaluación. \n\nAtención: Te quedan ${infraccionesRestantes} advertencias antes de que comiencen las penalizaciones de -${penalty} puntos por infracción.`);
     saveExamProgress();
     return;
   }
 
+  // 3. Caso de Penalización sin Expulsión
   const qActual = currentExamData[currentQuestionIndex];
   temporalRespuestas[qActual.id] = `ANULADA (${motivo})`;
 
   if (!gameState.penalidadTrampa) gameState.penalidadTrampa = 0;
-  gameState.penalidadTrampa -= 2;
+  gameState.penalidadTrampa -= penalty;
 
-  if (cheatWarnings === 2) {
-    alert(`¡ADVERTENCIA ANTI-TRAMPA (2/2)!\nDetalle: ${motivo}\n\nLa pregunta actual ha sido ANULADA y se han RESTADO 2 puntos de tu calificación global. A tu próxima infracción tu examen será cancelado por completo.`);
-    
-    saveExamProgress();
-    
-    if (currentQuestionIndex < totalQuestions - 1) {
-      clearInterval(timerInterval);
-      currentQuestionIndex++;
-      renderCurrentQuestion();
-    } else {
-      finishExam(); 
-    }
-  } 
-  else if (cheatWarnings >= 3) {
-    alert(`¡INFRACCIÓN CRÍTICA!\nDetalle: ${motivo}\n\nHas superado el límite de advertencias permitidas. Tu evaluación ha sido cancelada.\nSe han descontado 2 puntos adicionales por esta infracción.`);
+  alert(`¡PENALIZACIÓN APLICADA!\nDetalle: ${motivo}\n\nLa pregunta actual ha sido ANULADA y se han RESTADO ${penalty} puntos de tu calificación global.\n\nLlevas ${cheatWarnings} infracciones. Al llegar a ${expLimit}, tu examen será cancelado.`);
+  
+  saveExamProgress();
+  
+  if (currentQuestionIndex < totalQuestions - 1) {
+    clearInterval(timerInterval);
+    currentQuestionIndex++;
+    renderCurrentQuestion();
+  } else {
     finishExam(); 
   }
 }
