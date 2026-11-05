@@ -1,9 +1,12 @@
 // NUEVO LINK ASIGNADO
-const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbw_Fz4TqZZmJtbBucb0YKaERrbWL5wWCPIkDsk48ZAcVq1YhidAJyJJ3GlGHb_Q3zd8RQ/exec';
+const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzW0uHIoQHxQsElKjocebgloxqtABrzrFQapvQqKQvVyPvRICIGVzW9MYo_iWRud8VI6g/exec';
 
 let currentStudentName = '', currentRoomCode = '', currentExamData = [];
 let timeRemaining = 0, timerInterval;
 let myLastPuntaje = 0, myLastRespuestas = {};
+
+// ===== VARIABLE DEL CAPTCHA =====
+let currentCaptchaAnswer = 0;
 
 // ===== ESTADO DEL JUEGO (PARA PENALIZACIONES) =====
 let gameState = {
@@ -323,7 +326,11 @@ async function submitExamCreation() {
   }
 }
 
-async function downloadTeacherReport() {
+// ===== NUEVO: MÓDULO DE REVISIÓN Y CALIFICACIÓN (DOCENTE) =====
+let currentReviewData = { exam: [], results: [], room: '' };
+let currentGraderStudent = null; // Almacena los datos del alumno que se está evaluando
+
+async function loadTeacherReviewPanel() {
   const code = document.getElementById('report-code').value.trim();
   if(!code) return alert("Ingresa un código de sala.");
 
@@ -331,10 +338,197 @@ async function downloadTeacherReport() {
   const res = await postData({ action: 'obtener_resultados', codigoSala: code });
   showLoader(false);
 
-  if (res && res.status === 'success' && res.resultados.length > 0) {
-    generarPDFDocente(code, res.resultados, res.examen);
+  if (res && res.status === 'success') {
+    currentReviewData.exam = res.examen;
+    currentReviewData.results = res.resultados;
+    currentReviewData.room = code;
+    document.getElementById('review-room-name').innerText = code;
+    renderStudentsList();
+    showView('view-teacher-review');
   } else {
     alert("No hay resultados o la sala no existe.");
+  }
+}
+
+function renderStudentsList() {
+  const container = document.getElementById('students-list-container');
+  container.innerHTML = '';
+  
+  if (currentReviewData.results.length === 0) {
+    container.innerHTML = '<p class="text-center text-gray-500 py-4">No hay intentos registrados aún.</p>';
+    return;
+  }
+
+  // Agrupar visualmente por nombre para detectar duplicados fácilmente
+  const sortedResults = [...currentReviewData.results].sort((a, b) => a.alumno.localeCompare(b.alumno));
+
+  sortedResults.forEach(res => {
+    const dateStr = res.fecha ? new Date(res.fecha).toLocaleString() : 'Fecha no disponible';
+    const hasManualGrading = res.comentarios && Object.keys(res.comentarios).length > 0;
+    
+    container.innerHTML += `
+      <div class="flex flex-col md:flex-row justify-between items-center bg-white p-3 rounded border border-gray-200 shadow-sm mb-2">
+        <div class="text-left mb-2 md:mb-0">
+          <p class="font-bold text-lg">${res.alumno}</p>
+          <p class="text-xs text-gray-500">Intento: ${dateStr} | Fila BD: ${res.filaOriginal}</p>
+          <p class="text-sm font-bold mt-1">Nota: <span class="${res.puntaje >= 10.5 ? 'text-green-600' : 'text-red-600'}">${res.puntaje}</span> ${hasManualGrading ? '<span class="text-xs bg-indigo-100 text-indigo-800 px-2 py-1 rounded ml-2">Revisado</span>' : ''}</p>
+        </div>
+        <div class="flex gap-2">
+          <button onclick="openGrader(${res.filaOriginal})" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-1 px-3 rounded text-sm transition">Calificar</button>
+          <button onclick="downloadSinglePDF(${res.filaOriginal})" class="bg-purple-500 hover:bg-purple-600 text-white font-bold py-1 px-3 rounded text-sm transition">PDF</button>
+          <button onclick="deleteAttempt(${res.filaOriginal})" class="bg-red-500 hover:bg-red-600 text-white font-bold py-1 px-3 rounded text-sm transition">Eliminar</button>
+        </div>
+      </div>
+    `;
+  });
+}
+
+async function deleteAttempt(filaOriginal) {
+  if (confirm("¿Estás seguro de eliminar este intento? Esta acción no se puede deshacer.")) {
+    showLoader(true);
+    const res = await postData({ action: 'eliminar_intento', filaOriginal: filaOriginal });
+    if (res && res.status === 'success') {
+      // Actualizar vista local
+      currentReviewData.results = currentReviewData.results.filter(r => r.filaOriginal !== filaOriginal);
+      renderStudentsList();
+    } else {
+      alert("Error al eliminar.");
+    }
+    showLoader(false);
+  }
+}
+
+function openGrader(filaOriginal) {
+  currentGraderStudent = currentReviewData.results.find(r => r.filaOriginal === filaOriginal);
+  if (!currentGraderStudent) return;
+
+  document.getElementById('grader-student-name').innerText = currentGraderStudent.alumno;
+  
+  const container = document.getElementById('grader-questions-container');
+  container.innerHTML = '';
+  
+  // Calcular puntaje automático base
+  let scoreAuto = currentGraderStudent.puntaje;
+  if(currentGraderStudent.comentarios && currentGraderStudent.comentarios.autoScoreBase !== undefined){
+    scoreAuto = currentGraderStudent.comentarios.autoScoreBase;
+  }
+
+  document.getElementById('grader-auto-score').innerText = scoreAuto;
+  
+  currentReviewData.exam.forEach((q, index) => {
+    const respAlumno = currentGraderStudent.respuestas ? currentGraderStudent.respuestas[q.id] : "Sin responder";
+    const comments = (currentGraderStudent.comentarios && currentGraderStudent.comentarios[q.id]) ? currentGraderStudent.comentarios[q.id] : { pts: 0, txt: '' };
+    
+    let isManual = (q.tipo === 'text');
+    
+    let html = `
+      <div class="border rounded p-4 bg-white shadow-sm mb-4">
+        <p class="font-bold mb-2 text-gray-800">${index + 1}. ${q.texto ? q.texto.replace(/\n/g, '<br>') : 'Pregunta'}</p>
+        <div class="bg-gray-100 p-2 rounded mb-3 text-sm">
+          <strong>Respuesta del Alumno:</strong><br>
+          <span class="text-indigo-700">${respAlumno || 'Sin responder'}</span>
+        </div>
+    `;
+
+    if (isManual) {
+      html += `
+        <div class="bg-yellow-50 border border-yellow-200 p-3 rounded">
+          <div class="flex items-center justify-between mb-2">
+            <span class="font-bold text-sm text-yellow-800">Evaluación Manual (Máx ${q.puntaje} pts):</span>
+            <input type="number" class="manual-score-input w-20 text-center border p-1 rounded font-bold" data-qid="${q.id}" value="${comments.pts || 0}" min="0" max="${q.puntaje}" step="0.1" oninput="updateGraderTotals()">
+          </div>
+          <textarea class="manual-comment-input w-full border p-2 rounded text-sm" data-qid="${q.id}" placeholder="Escribe un comentario o retroalimentación (opcional)..." rows="2">${comments.txt || ''}</textarea>
+        </div>
+      `;
+    } else {
+      let isCorrect = false;
+      if (q.tipo === 'multiple') {
+        isCorrect = (respAlumno === q.correcta);
+      }
+      // Se puede expandir la validación de Match aquí para UI
+      
+      html += `
+        <div class="text-sm">
+          <span class="font-bold">Corrección Automática:</span> 
+          <span class="${isCorrect ? 'text-green-600' : 'text-red-600'} font-bold">${isCorrect ? '✓ Correcto' : '✗ Incorrecto'}</span>
+        </div>
+      `;
+    }
+
+    html += `</div>`;
+    container.innerHTML += html;
+  });
+
+  updateGraderTotals(scoreAuto);
+  showView('view-teacher-grader');
+}
+
+function updateGraderTotals(baseScore = null) {
+  if(baseScore === null) baseScore = parseFloat(document.getElementById('grader-auto-score').innerText);
+  
+  let manualTotal = 0;
+  document.querySelectorAll('.manual-score-input').forEach(input => {
+    manualTotal += parseFloat(input.value) || 0;
+  });
+  
+  const final = (baseScore + manualTotal).toFixed(1);
+  document.getElementById('grader-manual-score').innerText = manualTotal.toFixed(1);
+  document.getElementById('grader-final-score').innerText = final;
+}
+
+async function saveManualCorrection() {
+  const inputsPts = document.querySelectorAll('.manual-score-input');
+  const inputsTxt = document.querySelectorAll('.manual-comment-input');
+  
+  let comentarios = { 
+    autoScoreBase: parseFloat(document.getElementById('grader-auto-score').innerText),
+    manualScoreTotal: parseFloat(document.getElementById('grader-manual-score').innerText)
+  };
+  
+  inputsPts.forEach(inp => {
+    const qid = inp.getAttribute('data-qid');
+    if(!comentarios[qid]) comentarios[qid] = {};
+    comentarios[qid].pts = parseFloat(inp.value) || 0;
+  });
+  
+  inputsTxt.forEach(inp => {
+    const qid = inp.getAttribute('data-qid');
+    if(!comentarios[qid]) comentarios[qid] = {};
+    comentarios[qid].txt = inp.value.trim();
+  });
+
+  const nuevoPuntaje = parseFloat(document.getElementById('grader-final-score').innerText);
+
+  showLoader(true);
+  const res = await postData({ 
+    action: 'guardar_correccion', 
+    filaOriginal: currentGraderStudent.filaOriginal, 
+    nuevoPuntaje: nuevoPuntaje, 
+    comentarios: comentarios 
+  });
+  showLoader(false);
+
+  if (res && res.status === 'success') {
+    // Actualizar datos locales y volver a lista
+    currentGraderStudent.puntaje = nuevoPuntaje;
+    currentGraderStudent.comentarios = comentarios;
+    renderStudentsList();
+    showView('view-teacher-review');
+  } else {
+    alert("Error al guardar la calificación.");
+  }
+}
+
+// Envuelve la función generarPDFDocente existente para el botón masivo
+function downloadTeacherReportFromReview() {
+  if(currentReviewData.results.length === 0) return alert("No hay alumnos para exportar.");
+  generarPDFDocente(currentReviewData.room, currentReviewData.results, currentReviewData.exam);
+}
+
+function downloadSinglePDF(filaOriginal) {
+  const student = currentReviewData.results.find(r => r.filaOriginal === filaOriginal);
+  if(student) {
+    generarPDFDocente(currentReviewData.room, [student], currentReviewData.exam);
   }
 }
 
@@ -414,7 +608,7 @@ function generarPDFDocente(codigoSala, resultados, examen) {
           doc.setTextColor(142, 68, 173);
           doc.text(`[   ] Verificar manualmente (evaluación proporcional)`, 25, y);
           y += 8;
-      } else {
+      } else { // Pregunta Abierta
           doc.setTextColor(41, 128, 185);
           doc.text(`Respuesta libre del alumno:`, 25, y);
           y += 6;
@@ -422,9 +616,26 @@ function generarPDFDocente(codigoSala, resultados, examen) {
           const splitLibre = doc.splitTextToSize(`"${respAlumno}"`, 160);
           doc.text(splitLibre, 25, y);
           y += (splitLibre.length * 6) + 4;
-          doc.setTextColor(142, 68, 173);
-          doc.text(`[   ] Evaluación Manual Docente`, 25, y);
-          y += 8;
+          
+          // Verificar si hay comentarios/evaluación manual guardada
+          const comments = res.comentarios && res.comentarios[q.id] ? res.comentarios[q.id] : null;
+          if (comments && (comments.pts > 0 || comments.txt)) {
+             doc.setTextColor(39, 174, 96); // Verde para corrección
+             doc.text(`[ Evaluado ] Puntaje asignado: ${comments.pts} / ${q.puntaje}`, 25, y);
+             y += 6;
+             if (comments.txt) {
+               doc.setTextColor(100, 100, 100);
+               doc.setFont("helvetica", "italic");
+               const splitComment = doc.splitTextToSize(`Nota Docente: ${comments.txt}`, 150);
+               doc.text(splitComment, 30, y);
+               y += (splitComment.length * 6) + 2;
+               doc.setFont("helvetica", "normal");
+             }
+          } else {
+             doc.setTextColor(142, 68, 173);
+             doc.text(`[   ] Evaluación Manual Docente Pendiente`, 25, y);
+             y += 8;
+          }
       }
       
       if (y > 270) { doc.addPage(); y = 20; }
@@ -455,8 +666,51 @@ async function loginStudent() {
 
   if (res && res.status === 'success') {
     currentStudentName = name; currentRoomCode = code; currentExamData = res.examen;
-    startExam();
+    showAgreementView(); // EN LUGAR DE startExam();
   } else alert("Sala inactiva.");
+}
+
+// ===== FUNCIONES DEL ACUERDO Y VALIDACIÓN =====
+function showAgreementView() {
+  // Generar CAPTCHA Matemático simple (Sumas o restas básicas)
+  const num1 = Math.floor(Math.random() * 10) + 1;
+  const num2 = Math.floor(Math.random() * 10) + 1;
+  const isAddition = Math.random() > 0.5;
+  
+  if (isAddition) {
+    currentCaptchaAnswer = num1 + num2;
+    document.getElementById('captcha-question').innerText = `${num1} + ${num2} =`;
+  } else {
+    const max = Math.max(num1, num2);
+    const min = Math.min(num1, num2);
+    currentCaptchaAnswer = max - min;
+    document.getElementById('captcha-question').innerText = `${max} - ${min} =`;
+  }
+  
+  // Limpiar campos por si es un reintento
+  document.getElementById('captcha-answer').value = '';
+  document.getElementById('agreement-checkbox').checked = false;
+  
+  showView('view-agreement');
+}
+
+function verifyAndStartExam() {
+  const isChecked = document.getElementById('agreement-checkbox').checked;
+  const userAnswer = parseInt(document.getElementById('captcha-answer').value);
+  
+  if (!isChecked) {
+    alert("Debes aceptar los términos y condiciones (marcando la casilla inferior) para poder iniciar el examen.");
+    return;
+  }
+  
+  if (isNaN(userAnswer) || userAnswer !== currentCaptchaAnswer) {
+    alert("La respuesta del CAPTCHA matemático es incorrecta. Demuestra que eres tú resolviendo la nueva operación.");
+    showAgreementView(); // Recarga un nuevo captcha por seguridad
+    return;
+  }
+  
+  // Si superó el captcha y aceptó los términos, inicia la prueba y el cronómetro
+  startExam();
 }
 
 function startExam() {
