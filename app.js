@@ -616,14 +616,57 @@ function generarPDFDocente(codigoSala, resultados, examen) {
             y += 8;
           }
       } else if (q.tipo === 'match') {
-          // Mostrar respuesta del alumno para match
+          // Lógica avanzada para reporte PDF de tipo Match
           doc.setTextColor(41, 128, 185);
-          const splitMatch = doc.splitTextToSize(`Respuesta: ${respAlumno || 'Sin responder'}`, 165);
+          const splitMatch = doc.splitTextToSize(`Respuesta del alumno: ${respAlumno || 'Sin responder'}`, 165);
           doc.text(splitMatch, 25, y);
           y += (splitMatch.length * 6) + 2;
-          doc.setTextColor(142, 68, 173);
-          doc.text(`[   ] Verificar manualmente (evaluación proporcional)`, 25, y);
-          y += 8;
+
+          if (respAlumno && respAlumno !== "Sin responder" && !respAlumno.startsWith("ANULADA")) {
+             const conceptos = q.opciones?.conceptos || [];
+             const definicionesOriginales = q.opciones?.definiciones || [];
+             const totalPares = Math.min(conceptos.length, definicionesOriginales.length);
+             const ptsPregunta = q.puntaje || 0;
+             let aciertos = 0;
+
+             if (totalPares > 0) {
+                 const letrasDef = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
+                 const valorPorAcierto = ptsPregunta / totalPares;
+                 const paresAlumno = respAlumno.split(', ');
+                 
+                 paresAlumno.forEach(par => {
+                     const [num, letra] = par.split('-');
+                     const idxConcepto = parseInt(num) - 1;
+                     const idxLetraAlumno = letrasDef.indexOf(letra.toUpperCase());
+                     
+                     if (idxConcepto >= 0 && idxConcepto < totalPares && idxLetraAlumno !== -1) {
+                         const indiceOriginalDeLaDefinicionSeleccionada = q.shuffledMapping ? q.shuffledMapping[idxLetraAlumno] : idxLetraAlumno; // Fallback si no hubo shuffle
+                         if (indiceOriginalDeLaDefinicionSeleccionada === idxConcepto) aciertos++;
+                     }
+                 });
+
+                 const puntajeObtenido = (aciertos * valorPorAcierto).toFixed(1);
+                 
+                 // Imprimir resultado proporcional
+                 if (aciertos === totalPares) {
+                    doc.setTextColor(39, 174, 96);
+                    doc.text(`[ ✓ Automático ] Todo correcto: ${aciertos}/${totalPares} aciertos (${puntajeObtenido}/${ptsPregunta} pts)`, 25, y);
+                 } else if (aciertos > 0) {
+                    doc.setTextColor(243, 156, 18);
+                    doc.text(`[ ! Automático ] Parcial: ${aciertos}/${totalPares} aciertos (${puntajeObtenido}/${ptsPregunta} pts)`, 25, y);
+                 } else {
+                    doc.setTextColor(192, 57, 43);
+                    doc.text(`[ X Automático ] Incorrecto: ${aciertos}/${totalPares} aciertos (0/${ptsPregunta} pts)`, 25, y);
+                 }
+                 y += 8;
+             }
+          } else {
+             // Caso de anulación o sin responder
+             doc.setTextColor(192, 57, 43);
+             doc.text(`[ X Automático ] 0 aciertos (0/${q.puntaje || 0} pts)`, 25, y);
+             y += 8;
+          }
+
       } else { // Pregunta Abierta
           doc.setTextColor(41, 128, 185);
           doc.text(`Respuesta libre del alumno:`, 25, y);
